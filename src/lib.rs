@@ -1,22 +1,27 @@
-use scraper::{ElementRef, Html, Selector};
+use config::Config;
+use scraper::{Html, Selector};
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::fs;
 use std::thread;
 use std::time::Duration;
-use std::{env, process};
+use ureq::Agent;
 use ureq::Cookie;
-use ureq::{Agent, AgentBuilder};
 
 pub struct Messanger<'a> {
-    config: Config,
+    config: AppConf,
     agent: Agent,
     cookie: Option<Cookie<'a>>,
     players: Vec<String>,
 }
 impl<'a> Messanger<'a> {
     pub fn build() -> Self {
-        let config = get_config();
+        let conf = Config::builder()
+            .add_source(config::File::with_name("Settings"))
+            .add_source(config::Environment::with_prefix("APP"))
+            .build()
+            .unwrap();
+
+        let config = conf.try_deserialize::<AppConf>().unwrap();
+
         let agent: Agent = ureq::AgentBuilder::new()
             .timeout_read(Duration::from_secs(10))
             .timeout_write(Duration::from_secs(10))
@@ -30,21 +35,20 @@ impl<'a> Messanger<'a> {
     }
 
     pub fn run(&mut self) -> Result<(), ureq::Error> {
+        // println!("Conf: {:?}", self.config);
+
         self.login()?;
 
         let pages_amount = self.get_pages_amount();
         println!("Pages amount: {}", pages_amount);
 
         self.get_all_players(pages_amount);
-        let message =
-            fs::read_to_string("msg.txt").expect("Should have been able to read the file");
-
         self.players.iter().for_each(|name| {
             println!("Sending the message to {}", name);
-            self.send_message(&name, &message)
+            self.send_message(&name)
                 .expect("Error while sending a message");
             println!("Sent.");
-            thread::sleep(Duration::from_millis(10000));
+            thread::sleep(Duration::from_secs(self.config.delay));
         });
 
         Ok(())
@@ -95,9 +99,7 @@ impl<'a> Messanger<'a> {
     }
 
     fn get_all_players(&mut self, pages_amount: i32) {
-        for number in 146..=147
-        /* 1..=pages_amount */
-        {
+        for number in 1..=pages_amount {
             println!("Parsing page number - {}", number);
             let stat_resp = self.get_statistic_page_by_number(number).unwrap();
             let document = Html::parse_document(&stat_resp);
@@ -110,7 +112,7 @@ impl<'a> Messanger<'a> {
                 let name = names.get(0).unwrap();
                 self.players.push(name.to_string());
             }
-            thread::sleep(Duration::from_millis(250));
+            thread::sleep(Duration::from_millis(300));
         }
         println!("Added players {}", self.players.len());
         println!("List of players: {:?}", self.players);
@@ -128,8 +130,8 @@ impl<'a> Messanger<'a> {
         Ok(result)
     }
 
-    fn send_message(&self, recipient: &str, message: &str) -> Result<(), ureq::Error> {
-        let messege_resp = self.agent.post(&format!("{}/messages/write", self.config.server))
+    fn send_message(&self, recipient: &str) -> Result<(), ureq::Error> {
+        let _messege_resp = self.agent.post(&format!("{}/messages/write", self.config.server))
         .set("content-Type", "application/x-www-form-urlencoded")
         .set("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36")
         .set("origin", "https://ts20.x2.international.travian.com")
@@ -139,27 +141,11 @@ impl<'a> Messanger<'a> {
         .send_form(&[
             ("an", recipient),
             ("be", &self.config.subject),
-            ("message", message),
+            ("message", &self.config.message),
     ])?;
-        thread::sleep(Duration::from_millis(20000));
-        let result = self.agent.get(&format!("{}/dorf1.php", self.config.server))
-        .set("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
-        .set("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36")
-        .set("referer", &self.config.server)
-        .set("cookie", &format!("{}={}", self.cookie.as_ref().unwrap().name(), self.cookie.as_ref().unwrap().value()))
-        .call()?
-        .into_string()?;
 
         Ok(())
     }
-}
-
-fn get_config() -> Config {
-    let args: Vec<String> = env::args().collect();
-    Config::build(&args).unwrap_or_else(|err| {
-        println!("Problem parsing arguments: {err}");
-        process::exit(1);
-    })
 }
 
 #[derive(Deserialize, Debug)]
@@ -167,25 +153,14 @@ struct Nonce {
     nonce: String,
 }
 
-pub struct Config {
+#[derive(Deserialize, Debug)]
+struct AppConf {
     server: String,
     login: String,
     pass: String,
+    delay: u64,
     subject: String,
-}
-
-impl Config {
-    pub fn build(args: &[String]) -> Result<Config, &'static str> {
-        if args.len() < 4 {
-            return Err("not enought arguments");
-        }
-        Ok(Config {
-            server: args[1].clone(),
-            login: args[2].clone(),
-            pass: args[3].clone(),
-            subject: args[4].clone(),
-        })
-    }
+    message: String,
 }
 
 #[cfg(test)]

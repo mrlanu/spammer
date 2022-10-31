@@ -1,7 +1,5 @@
-use messenger::{Config, Messanger};
-use std::{env, process};
+use messenger::Messanger;
 
 fn main() {
-    println!("Starting...");
     Messanger::build().run().expect("Error");
 }
