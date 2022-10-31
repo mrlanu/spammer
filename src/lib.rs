@@ -1,10 +1,15 @@
 use config::Config;
 use scraper::{Html, Selector};
 use serde::Deserialize;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, Write};
+use std::process;
 use std::thread;
 use std::time::Duration;
 use ureq::Agent;
 use ureq::Cookie;
+
+const PATH: &str = "players.txt";
 
 pub struct Messanger<'a> {
     config: AppConf,
@@ -35,26 +40,76 @@ impl<'a> Messanger<'a> {
     }
 
     pub fn run(&mut self) -> Result<(), ureq::Error> {
-        // println!("Conf: {:?}", self.config);
-
+        let mut answer = String::new();
         self.login()?;
+        while &answer.trim()[..] != "q" {
+            self.print_menu();
 
-        let pages_amount = self.get_pages_amount();
-        println!("Pages amount: {}", pages_amount);
-
-        self.get_all_players(pages_amount);
-        self.players.iter().for_each(|name| {
-            println!("Sending the message to {}", name);
-            self.send_message(&name)
-                .expect("Error while sending a message");
-            println!("Sent.");
-            thread::sleep(Duration::from_secs(self.config.delay));
-        });
-
+            io::stdin()
+                .read_line(&mut answer)
+                .expect("Filed to read line");
+            match &answer.trim()[..] {
+                "1" => {
+                    println!("Parsing...\n");
+                    self.parse_players();
+                    println!("\nParsing has been completed.");
+                }
+                "2" => {
+                    println!("Sending messages");
+                    while self.players.len() > 0 {
+                        println!("\nPlayers left: {}\n", self.players.len());
+                        self.load_data();
+                        if let Some(p) = self.players.pop() {
+                            println!("Sending the message to {}", p);
+                            self.send_message(&p)
+                                .expect("Error while sending a message");
+                            println!("Sent.");
+                            println!("\nWaiting {} sec", self.config.delay);
+                            self.save_data();
+                            thread::sleep(Duration::from_secs(self.config.delay));
+                        }
+                    }
+                    println!("\nAll done.\n");
+                }
+                "q" => process::exit(1),
+                _ => (),
+            }
+            answer.clear();
+        }
         Ok(())
     }
 
+    fn print_menu(&self) {
+        println!("\nParse all players - 1");
+        println!("Send messages - 2");
+        println!("Quit - q");
+    }
+
+    fn parse_players(&mut self) {
+        let pages_amount = self.get_pages_amount();
+        println!("Pages amount: {}", pages_amount);
+        self.get_all_players(pages_amount);
+        self.save_data();
+    }
+
+    fn save_data(&self) {
+        let pls_json = serde_json::to_string(&self.players).unwrap();
+
+        let mut file = File::create(PATH).expect("Error");
+        file.write_all(pls_json.as_bytes()).expect("Error");
+        file.write_all("\n".as_bytes()).expect("Error");
+    }
+
+    fn load_data(&mut self) {
+        let input = File::open(PATH).expect("Error");
+        let buffered = BufReader::new(input);
+        for line in buffered.lines() {
+            self.players = serde_json::from_str(&line.unwrap()).unwrap();
+        }
+    }
+
     fn login(&mut self) -> Result<(), ureq::Error> {
+        println!("Try to login..");
         let login_resp: Nonce = self.agent.post(&format!("{}/api/v1/auth/login", self.config.server))
         .set("Content-Type", "application/json")
         .set("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36")
@@ -77,6 +132,7 @@ impl<'a> Messanger<'a> {
 
         let cookie = Cookie::parse(cookie_header).unwrap();
         self.cookie = Some(cookie);
+        println!("Logged in.");
         Ok(())
     }
 
@@ -100,7 +156,7 @@ impl<'a> Messanger<'a> {
 
     fn get_all_players(&mut self, pages_amount: i32) {
         for number in 1..=pages_amount {
-            println!("Parsing page number - {}", number);
+            println!("\nParsing page number - {}", number);
             let stat_resp = self.get_statistic_page_by_number(number).unwrap();
             let document = Html::parse_document(&stat_resp);
 
@@ -114,9 +170,9 @@ impl<'a> Messanger<'a> {
             }
             thread::sleep(Duration::from_millis(300));
         }
-        println!("Added players {}", self.players.len());
+        println!("\nAdded players {}\n", self.players.len());
         println!("List of players: {:?}", self.players);
-        println!("Done.");
+        println!("\nDone.");
     }
 
     fn get_statistic_page_by_number(&self, number: i32) -> Result<String, ureq::Error> {
@@ -153,7 +209,7 @@ struct Nonce {
     nonce: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize)]
 struct AppConf {
     server: String,
     login: String,

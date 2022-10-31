@@ -1,7 +1,7 @@
 server="https://ts20.x2.international.travian.com"
 login="Leonidas"
 pass="123qwe"
-delay=20
+delay=15
 subject="checkup"
 message='''
 hello, my friend.
