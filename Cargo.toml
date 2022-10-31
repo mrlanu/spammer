@@ -1,0 +1,12 @@
+[package]
+name = "spammer"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+config = "0.13"
+ureq = { version = "2.5", features = ["json", "cookies"] }
+scraper = "0.13"
+serde = { version = "1", features = ["derive"] }
