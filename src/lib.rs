@@ -42,6 +42,7 @@ impl<'a> Messanger<'a> {
     pub fn run(&mut self) -> Result<(), ureq::Error> {
         let mut answer = String::new();
         self.login()?;
+        self.load_data();
         while &answer.trim()[..] != "q" {
             self.print_menu();
 
@@ -58,7 +59,7 @@ impl<'a> Messanger<'a> {
                     println!("Sending messages");
                     while self.players.len() > 0 {
                         println!("\nPlayers left: {}\n", self.players.len());
-                        self.load_data();
+
                         if let Some(p) = self.players.pop() {
                             println!("Sending the message to {}", p);
                             self.send_message(&p)
@@ -92,19 +93,33 @@ impl<'a> Messanger<'a> {
         self.save_data();
     }
 
-    fn save_data(&self) {
-        let pls_json = serde_json::to_string(&self.players).unwrap();
+    fn save_data(&mut self) {
+        let mut flipped_players = Vec::new();
+        self.players.iter().for_each(|p| {
+            flipped_players.push(p);
+        });
 
-        let mut file = File::create(PATH).expect("Error");
-        file.write_all(pls_json.as_bytes()).expect("Error");
+        let pls_json = serde_json::to_string(&flipped_players).unwrap();
+
+        let mut file = File::create(PATH).expect("Error. Can't create a new file.");
+        file.write_all(pls_json.as_bytes())
+            .expect("Error. While writing to the file.");
         file.write_all("\n".as_bytes()).expect("Error");
     }
 
     fn load_data(&mut self) {
-        let input = File::open(PATH).expect("Error");
-        let buffered = BufReader::new(input);
-        for line in buffered.lines() {
-            self.players = serde_json::from_str(&line.unwrap()).unwrap();
+        match File::open(PATH) {
+            Ok(input) => {
+                let buffered = BufReader::new(input);
+                for line in buffered.lines() {
+                    self.players = serde_json::from_str(&line.unwrap())
+                        .expect("Error while deserealizing players.");
+                }
+            }
+            Err(_) => {
+                println!("\nThere is nothing to do. Parse some players first.");
+                self.players = Vec::new();
+            }
         }
     }
 
@@ -130,7 +145,7 @@ impl<'a> Messanger<'a> {
             .expect("Error: no header set-cookie")
             .to_string();
 
-        let cookie = Cookie::parse(cookie_header).unwrap();
+        let cookie = Cookie::parse(cookie_header).expect("Error. Parsing cookie.");
         self.cookie = Some(cookie);
         println!("Logged in.");
         Ok(())
@@ -155,7 +170,7 @@ impl<'a> Messanger<'a> {
     }
 
     fn get_all_players(&mut self, pages_amount: i32) {
-        for number in 1..=pages_amount {
+        for number in 185..=186 {
             println!("\nParsing page number - {}", number);
             let stat_resp = self.get_statistic_page_by_number(number).unwrap();
             let document = Html::parse_document(&stat_resp);
@@ -187,7 +202,7 @@ impl<'a> Messanger<'a> {
     }
 
     fn send_message(&self, recipient: &str) -> Result<(), ureq::Error> {
-        let _messege_resp = self.agent.post(&format!("{}/messages/write", self.config.server))
+        let messege_resp = self.agent.post(&format!("{}/messages/write", self.config.server))
         .set("content-Type", "application/x-www-form-urlencoded")
         .set("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36")
         .set("origin", "https://ts20.x2.international.travian.com")
@@ -199,6 +214,8 @@ impl<'a> Messanger<'a> {
             ("be", &self.config.subject),
             ("message", &self.config.message),
     ])?;
+
+        println!("Sent message response status: {}", messege_resp.status());
 
         Ok(())
     }
