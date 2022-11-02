@@ -1,9 +1,8 @@
 server="https://ts20.x2.international.travian.com"
-login="Leonidas"
+login="peppa"
 pass="123qwe"
 delay=15
-subject="checkup"
+subject="hi"
 message='''
-hello, my friend.
-how are you ?
+what should I do here ?
 '''

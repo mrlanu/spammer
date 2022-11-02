@@ -3,7 +3,6 @@ use scraper::{Html, Selector};
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
-use std::process;
 use std::thread;
 use std::time::Duration;
 use ureq::Agent;
@@ -43,7 +42,12 @@ impl<'a> Messanger<'a> {
         let mut answer = String::new();
         self.login()?;
         self.load_data();
-        while &answer.trim()[..] != "q" {
+
+        if self.players.len() == 0 {
+            println!("\nThere is no players. Parse first.")
+        }
+
+        loop {
             self.print_menu();
 
             io::stdin()
@@ -72,7 +76,14 @@ impl<'a> Messanger<'a> {
                     }
                     println!("\nAll done.\n");
                 }
-                "q" => process::exit(1),
+                "3" => {
+                    self.logout()?;
+                }
+                "q" => {
+                    println!("Bye.");
+                    break;
+                }
+
                 _ => (),
             }
             answer.clear();
@@ -87,19 +98,31 @@ impl<'a> Messanger<'a> {
     }
 
     fn parse_players(&mut self) {
+        let mut start = String::new();
+        let mut end = String::new();
         let pages_amount = self.get_pages_amount();
         println!("Pages amount: {}", pages_amount);
-        self.get_all_players(pages_amount);
+        println!("\nParse from page:");
+        io::stdin()
+            .read_line(&mut start)
+            .expect("Filed to read line");
+        println!("\nTo page (excluded):");
+        io::stdin().read_line(&mut end).expect("Filed to read line");
+
+        self.get_all_players(
+            start
+                .trim()
+                .parse::<i32>()
+                .expect("Error. It's not a number"),
+            end.trim().parse::<i32>().expect("Error. It's not a number"),
+        );
+        self.flip_players();
         self.save_data();
+        println!("List of players: {:?}", self.players);
     }
 
     fn save_data(&mut self) {
-        let mut flipped_players = Vec::new();
-        self.players.iter().for_each(|p| {
-            flipped_players.push(p);
-        });
-
-        let pls_json = serde_json::to_string(&flipped_players).unwrap();
+        let pls_json = serde_json::to_string(&self.players).unwrap();
 
         let mut file = File::create(PATH).expect("Error. Can't create a new file.");
         file.write_all(pls_json.as_bytes())
@@ -117,10 +140,17 @@ impl<'a> Messanger<'a> {
                 }
             }
             Err(_) => {
-                println!("\nThere is nothing to do. Parse some players first.");
                 self.players = Vec::new();
             }
         }
+    }
+
+    fn flip_players(&mut self) {
+        let mut flipped_players = Vec::new();
+        while self.players.len() > 0 {
+            flipped_players.push(self.players.pop().unwrap());
+        }
+        self.players = flipped_players;
     }
 
     fn login(&mut self) -> Result<(), ureq::Error> {
@@ -151,6 +181,20 @@ impl<'a> Messanger<'a> {
         Ok(())
     }
 
+    fn logout(&self) -> Result<(), ureq::Error> {
+        println!("Try to logout..");
+        let resp = self.agent.post(&format!("{}/api/v1/auth/logout", self.config.server))
+        .set("Content-Type", "application/json")
+        .set("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36")
+        .set("origin", "https://ts20.x2.international.travian.com")
+        .set("authorization", "Bearer undefined")
+        .set("cookie", &format!("{}={}", self.cookie.as_ref().unwrap().name(), self.cookie.as_ref().unwrap().value()))
+        .call()?;
+
+        println!("Logged out. {:?}", resp.status_text());
+        Ok(())
+    }
+
     fn get_pages_amount(&self) -> i32 {
         let stat_resp = self.get_statistic_page_by_number(1).unwrap();
         let document = Html::parse_document(&stat_resp);
@@ -169,8 +213,9 @@ impl<'a> Messanger<'a> {
         max_page
     }
 
-    fn get_all_players(&mut self, pages_amount: i32) {
-        for number in 185..=186 {
+    fn get_all_players(&mut self, start: i32, end: i32) {
+        for number in start..end {
+            self.players = Vec::new();
             println!("\nParsing page number - {}", number);
             let stat_resp = self.get_statistic_page_by_number(number).unwrap();
             let document = Html::parse_document(&stat_resp);
@@ -186,7 +231,7 @@ impl<'a> Messanger<'a> {
             thread::sleep(Duration::from_millis(300));
         }
         println!("\nAdded players {}\n", self.players.len());
-        println!("List of players: {:?}", self.players);
+
         println!("\nDone.");
     }
 
@@ -201,7 +246,7 @@ impl<'a> Messanger<'a> {
         Ok(result)
     }
 
-    fn send_message(&self, recipient: &str) -> Result<(), ureq::Error> {
+    fn send_message(&mut self, recipient: &str) -> Result<(), ureq::Error> {
         let messege_resp = self.agent.post(&format!("{}/messages/write", self.config.server))
         .set("content-Type", "application/x-www-form-urlencoded")
         .set("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36")
@@ -214,8 +259,10 @@ impl<'a> Messanger<'a> {
             ("be", &self.config.subject),
             ("message", &self.config.message),
     ])?;
-
-        println!("Sent message response status: {}", messege_resp.status());
+        if messege_resp.get_url() != "https://ts20.x2.international.travian.com/messages/inbox" {
+            println!("\nHas been kicked out.");
+            self.login()?;
+        }
 
         Ok(())
     }
