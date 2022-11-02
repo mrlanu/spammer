@@ -45,6 +45,9 @@ impl<'a> Messanger<'a> {
 
         if self.players.len() == 0 {
             println!("\nThere is no players. Parse first.")
+        } else {
+            println!("\nI have {} players left", self.players.len());
+            println!("\nPlayers: {:?}", self.players);
         }
 
         loop {
@@ -214,8 +217,8 @@ impl<'a> Messanger<'a> {
     }
 
     fn get_all_players(&mut self, start: i32, end: i32) {
+        self.players = Vec::new();
         for number in start..end {
-            self.players = Vec::new();
             println!("\nParsing page number - {}", number);
             let stat_resp = self.get_statistic_page_by_number(number).unwrap();
             let document = Html::parse_document(&stat_resp);
